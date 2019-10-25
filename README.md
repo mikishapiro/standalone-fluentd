@@ -35,6 +35,7 @@ secret/standalone-fluentd-splunk-tls patched
 7. oc patch secrets/logging-fluentd --type=json --patch "[{'op':'add','path':'/data/tls.crt','value':'$(base64 -w 0 tls.crt)'}]"
 
 secret/logging-fluentd patched
+
 8. oc patch secrets/logging-fluentd --type=json --patch "[{'op':'add','path':'/data/tls.key','value':'$(base64 -w 0 tls1.key)'}]"
 
 secret/logging-fluentd patched
