@@ -1,0 +1,249 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  creationTimestamp: null
+  name: standalone-fluentd
+objects:
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      openshift.io/generated-by: OpenShiftNewApp
+    creationTimestamp: null
+    name: ${VAR_STANDALONE_INSTANCE_NAME}
+  spec:
+    failedBuildsHistoryLimit: 5
+    nodeSelector: null
+    output:
+      to:
+        kind: ImageStreamTag
+        name: ${VAR_STANDALONE_INSTANCE_NAME}:latest
+    postCommit: {}
+    resources: {}
+    runPolicy: SerialLatestOnly
+    source:
+      dockerfile: "FROM docker-registry.default.svc:5000/openshift-logging/ose-logging-fluentd\r\nRUN
+        mkdir -p /var/log/fluentd /var/lib/fluentd /etc/fluent/secureforward_signed_certs;
+        touch /var/log/fluentd/fluentd.log ; chmod 755 /var/log/fluentd /var/lib/fluentd;
+        chmod 666 /var/log/fluentd/fluentd.log ; for file in /etc/fluent/configs.d/openshift/*.conf
+        ; do cp /dev/null $file ; done\r\nRUN yum --disablerepo=* --enablerepo=rhel-7-server-rpms
+        --enablerepo=rhel-7-server-optional-rpms -y  install tcpdump openssl net-tools
+        telnet yum-utils ruby-devel make automake gcc gcc-c++; gem install fluent-plugin-splunk-ex\r\nEXPOSE
+        24284/tcp\r\nUSER 1001\r\nRUN echo $'#!/bin/bash -x\\n\\\r\n/usr/bin/fluentd
+        -vv \\n\\\r\necho notdemonised\\n\\\r\ncat /var/log/fluentd/fluentd.log\\n\\\r\nsleep
+        360\\n'\\\r\n>> /tmp/run.sh\r\nRUN chmod 755 /tmp/run.sh\r\nCMD /tmp/run.sh"
+      type: Dockerfile
+    strategy:
+      dockerStrategy:
+        forcePull: true
+      type: Docker
+    successfulBuildsHistoryLimit: 5
+    triggers: []
+- apiVersion: apps.openshift.io/v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      openshift.io/generated-by: OpenShiftNewApp
+    creationTimestamp: null
+    generation: 5
+    labels:
+      app: ${VAR_STANDALONE_INSTANCE_NAME}
+    name: ${VAR_STANDALONE_INSTANCE_NAME}
+  spec:
+    replicas: 1
+    revisionHistoryLimit: 10
+    selector:
+      deploymentconfig: ${VAR_STANDALONE_INSTANCE_NAME
+    strategy:
+      activeDeadlineSeconds: 21600
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
+    template:
+      metadata:
+        annotations:
+          openshift.io/generated-by: OpenShiftNewApp
+        labels:
+          app: ${VAR_STANDALONE_INSTANCE_NAME}
+      spec:
+        containers:
+        - env:
+          - name: ENV_SPLUNK_TCP_HOST
+            value: ${VAR_SPLUNK_TCP_HOST}
+          - name: ENV_SPLUNK_TCP_PORT
+            value: ${VAR_SPLUNK_TCP_PORT}
+          - name: MERGE_JSON_LOG
+            value: "true"
+          - name: K8S_HOST_URL
+            value: https://kubernetes.default.svc.cluster.local
+          - name: ES_HOST
+            value: logging-es
+          - name: ES_PORT
+            value: "9200"
+          - name: ES_CLIENT_CERT
+            value: /etc/fluent/keys/cert
+          - name: ES_CLIENT_KEY
+            value: /etc/fluent/keys/key
+          - name: ES_CA
+            value: /etc/fluent/keys/ca
+          - name: OPS_HOST
+            value: logging-es
+          - name: OPS_PORT
+            value: "9200"
+          - name: OPS_CLIENT_CERT
+            value: /etc/fluent/keys/ops-cert
+          - name: OPS_CLIENT_KEY
+            value: /etc/fluent/keys/ops-key
+          - name: OPS_CA
+            value: /etc/fluent/keys/ops-ca
+          - name: JOURNAL_SOURCE
+          - name: JOURNAL_READ_FROM_HEAD
+          - name: BUFFER_QUEUE_LIMIT
+            value: "32"
+          - name: BUFFER_SIZE_LIMIT
+            value: 8m
+          - name: FILE_BUFFER_LIMIT
+            value: 256Mi
+          - name: USE_REMOTE_SYSLOG
+            value: "false"
+          image: docker-registry.default.svc:5000/openshift-logging/standalone-fluentd@sha256:efd9e2b15247e4e2e3047fff9966a4363c5967e1a804a813c353e5e1aeee6035
+          imagePullPolicy: IfNotPresent
+          name: ${VAR_STANDALONE_INSTANCE_NAME}
+          ports:
+          - containerPort: 24284
+            protocol: TCP
+          - containerPort: 24224
+            protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /etc/fluent/keys
+            name: certs
+            readOnly: true
+          - mountPath: /etc/fluent/standlone_keys
+            name: ${VAR_STANDALONE_INSTANCE_NAME}-tls
+            readOnly: true
+          - mountPath: /etc/fluent/configs.d/user
+            name: config
+            readOnly: true
+        dnsPolicy: ClusterFirst
+        nodeSelector:
+          node-role.kubernetes.io/compute: "true"
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: certs
+          secret:
+            defaultMode: 420
+            secretName: logging-fluentd
+        - name: ${VAR_STANDALONE_INSTANCE_NAME}-tls
+          secret:
+            defaultMode: 420
+            secretName: ${VAR_STANDALONE_INSTANCE_NAME}-tls
+        - configMap:
+            defaultMode: 420
+            name: ${VAR_STANDALONE_INSTANCE_NAME}
+          name: config
+    test: false
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - ${VAR_STANDALONE_INSTANCE_NAME}
+        from:
+          kind: ImageStreamTag
+          name: ${VAR_STANDALONE_INSTANCE_NAME}:latest
+        lastTriggeredImage: docker-registry.default.svc:5000/openshift-logging/${VAR_STANDALONE_INSTANCE_NAME}
+      type: ImageChange
+    - type: ConfigChange
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      openshift.io/image.dockerRepositoryCheck: 2019-07-01T08:33:27Z
+    generation: 2
+    name: ${VAR_STANDALONE_INSTANCE_NAME}
+  spec:
+    lookupPolicy:
+      local: false
+- apiVersion: v1
+  data:
+    fluent.conf: |
+      <system>
+        log_level warn
+      </system>
+      <source>
+        @type secure_forward
+        # self_hostname #{ENV[\'HOSTNAME\']}
+        bind 0.0.0.0
+        port 24284
+        shared_key modelsharedkey
+        secure           yes
+        enable_strict_verification no
+        self_hostname ${VAR_STANDALONE_INSTANCE_NAME}.openshift-logging.svc.cluster.local
+        ca_cert_path     /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+        cert_path        /etc/fluent/standlone_keys/tls.crt
+        private_key_path /etc/fluent/standlone_keys/tls.key
+        private_key_passphrase test
+      </source>
+      <filter **>
+        @type record_transformer
+        <record>
+          forwarded_by ${VAR_STANDALONE_INSTANCE_NAME}.openshift-logging.svc.cluster.local
+          source_component "OCP"
+        </record>
+      </filter>
+      # <match **>
+      #   @type file
+      #   path /tmp/fluent-file
+      # </match>
+      <match **>
+        type splunk_ex
+        host "#{ENV['ENV_SPLUNK_TCP_HOST']}"
+        port "#{ENV['ENV_SPLUNK_TCP_PORT']}"
+        output_format json|kv
+      </match>
+  kind: ConfigMap
+  metadata:
+    name: ${VAR_STANDALONE_INSTANCE_NAME}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      service.alpha.openshift.io/serving-cert-secret-name: ${VAR_STANDALONE_INSTANCE_NAME}-tls
+      service.alpha.openshift.io/serving-cert-signed-by: openshift-service-serving-signer@1561964808
+    creationTimestamp: null
+    name: ${VAR_STANDALONE_INSTANCE_NAME}
+  spec:
+    ports:
+    - port: 24284
+      protocol: TCP
+      targetPort: 24284
+    selector:
+      app: ${VAR_STANDALONE_INSTANCE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+parameters:
+- description: Standalone Fluent Instance Name
+  displayName: Standalone Fluent Instance Name
+  name: VAR_STANDALONE_INSTANCE_NAME
+  required: true
+  value: standalone-fluentd
+- description: Splunk TCP listener IP
+  displayName: Splunk TCP listener IP
+  name: VAR_SPLUNK_TCP_HOST
+  required: true
+  value: 10.0.0.1
+- description: Splunk TCP listener port
+  displayName: Splunk TCP listener port
+  name: VAR_SPLUNK_TCP_PORT
+  required: true
+  value: "9997"
